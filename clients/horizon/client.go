@@ -245,6 +245,57 @@ func addAssetToQuery(v map[string][]string, assetPrefix string, asset Asset) {
 	}
 }
 
+func (c *Client) LoadTransactions(
+	accountID string,
+	params ...interface{},
+) (transactions TransactionsPage, err error) {
+	c.fixURLOnce.Do(c.fixURL)
+	endpoint := ""
+	query := url.Values{}
+
+	for _, param := range params {
+		switch param := param.(type) {
+		case Limit:
+			query.Add("limit", strconv.Itoa(int(param)))
+		case Order:
+			query.Add("order", string(param))
+		case Cursor:
+			query.Add("cursor", string(param))
+		default:
+			err = fmt.Errorf("Undefined parameter (%T): %+v", param, param)
+			return
+		}
+	}
+
+	endpoint = fmt.Sprintf(
+		"%s/accounts/%s/transactions?%s",
+		c.URL,
+		accountID,
+		query.Encode(),
+	)
+
+	// ensure our endpoint is a real url
+	_, err = url.Parse(endpoint)
+	if err != nil {
+		err = errors.Wrap(err, "failed to parse endpoint")
+		return
+	}
+
+	resp, err := c.HTTP.Get(endpoint)
+	if err != nil {
+		err = errors.Wrap(err, "failed to load endpoint")
+		return
+	}
+
+	if err != nil {
+		return
+	}
+
+	err = decodeResponse(resp, &transactions)
+	return
+}
+
+
 // LoadOperation loads a single operation from Horizon server
 func (c *Client) LoadOperation(operationID string) (payment Payment, err error) {
 	c.fixURLOnce.Do(c.fixURL)

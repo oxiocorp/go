@@ -103,6 +103,13 @@ type OffersPage struct {
 	} `json:"_embedded"`
 }
 
+type TransactionsPage struct {
+	Links hal.Links `json:"_links"`
+	Embedded struct {
+		Records []hProtocol.Transaction `json:"records"`
+	} `json:"_embedded"`
+}
+
 type Payment struct {
 	ID          string `json:"id"`
 	Type        string `json:"type"`
