@@ -2,7 +2,7 @@ package horizon
 
 import (
 	"encoding/json"
-	hProtocol "github.com/stellar/go/protocols/horizon"
+	hProtocol "github.com/oxiocorp/go/protocols/horizon" // TODO: Switch back to Stellar
 	"github.com/stellar/go/support/render/hal"
 )
 

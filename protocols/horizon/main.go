@@ -8,7 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 
-	"github.com/stellar/go/protocols/horizon/base"
+	"github.com/oxiocorp/go/protocols/horizon/base" // TODO: Switch back to Stellar
 	"github.com/stellar/go/strkey"
 	"github.com/stellar/go/support/errors"
 	"github.com/stellar/go/support/render/hal"
