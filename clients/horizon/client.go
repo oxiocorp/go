@@ -245,7 +245,7 @@ func addAssetToQuery(v map[string][]string, assetPrefix string, asset Asset) {
 	}
 }
 
-func (c *Client) LoadTransactions(
+func (c *Client) LoadAccountTransactions(
 	accountID string,
 	params ...interface{},
 ) (transactions TransactionsPage, err error) {

@@ -107,8 +107,8 @@ func (m *MockClient) LoadTransaction(transactionID string) (transaction Transact
 	return a.Get(0).(Transaction), a.Error(1)
 }
 
-// LoadTransactions is a mocking a method
-func (m *MockClient) LoadTransactions(accountId string, params ...interface {}) (transactionPage TransactionsPage, err error) {
+// LoadAccountTransactions is a mocking a method
+func (m *MockClient) LoadAccountTransactions(accountId string, params ...interface {}) (transactionPage TransactionsPage, err error) {
 	a := m.Called(accountId)
 	return a.Get(0).(TransactionsPage), a.Error(1)
 }
