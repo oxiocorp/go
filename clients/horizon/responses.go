@@ -2,6 +2,7 @@ package horizon
 
 import (
 	"encoding/json"
+
 	hProtocol "github.com/stellar/go/protocols/horizon"
 	"github.com/stellar/go/support/render/hal"
 )

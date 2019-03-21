@@ -245,12 +245,10 @@ func addAssetToQuery(v map[string][]string, assetPrefix string, asset Asset) {
 	}
 }
 
-func (c *Client) LoadAccountTransactions(
-	accountID string,
-	params ...interface{},
-) (transactions TransactionsPage, err error) {
+func (c *Client) LoadAccountTransactions(accountID string, params ...interface{}) (TransactionsPage, error) {
+	tx := TransactionsPage{}
+
 	c.fixURLOnce.Do(c.fixURL)
-	endpoint := ""
 	query := url.Values{}
 
 	for _, param := range params {
@@ -262,37 +260,25 @@ func (c *Client) LoadAccountTransactions(
 		case Cursor:
 			query.Add("cursor", string(param))
 		default:
-			err = fmt.Errorf("Undefined parameter (%T): %+v", param, param)
-			return
+			return tx, errors.Errorf("Undefined parameter (%T): %+v", param, param)
 		}
 	}
 
-	endpoint = fmt.Sprintf(
-		"%s/accounts/%s/transactions?%s",
-		c.URL,
-		accountID,
-		query.Encode(),
-	)
+	endpoint := fmt.Sprintf("%s/accounts/%s/transactions?%s", c.URL, accountID, query.Encode())
 
 	// ensure our endpoint is a real url
-	_, err = url.Parse(endpoint)
+	_, err := url.Parse(endpoint)
 	if err != nil {
-		err = errors.Wrap(err, "failed to parse endpoint")
-		return
+		return tx, errors.Wrap(err, "parsing endpoint")
 	}
 
 	resp, err := c.HTTP.Get(endpoint)
 	if err != nil {
-		err = errors.Wrap(err, "failed to load endpoint")
-		return
+		return tx, errors.Wrap(err, "loading endpoint")
 	}
 
-	if err != nil {
-		return
-	}
-
-	err = decodeResponse(resp, &transactions)
-	return
+	err = decodeResponse(resp, &tx)
+	return tx, errors.Wrap(err, "decoding response to transaction")
 }
 
 // LoadOperation loads a single operation from Horizon server
