@@ -1,14 +1,17 @@
-// Package resource contains the type definitions for all of horizons
+// Package horizon contains the type definitions for all of horizon's
 // response resources.
 package horizon
 
 import (
+	"fmt"
+	"strconv"
 	"time"
 
 	"encoding/base64"
 	"encoding/json"
 
 	"github.com/stellar/go/protocols/horizon/base"
+	"github.com/stellar/go/protocols/horizon/effects"
 	"github.com/stellar/go/strkey"
 	"github.com/stellar/go/support/errors"
 	"github.com/stellar/go/support/render/hal"
@@ -42,6 +45,7 @@ type Account struct {
 	SubentryCount        int32             `json:"subentry_count"`
 	InflationDestination string            `json:"inflation_destination,omitempty"`
 	HomeDomain           string            `json:"home_domain,omitempty"`
+	LastModifiedLedger   uint32            `json:"last_modified_ledger"`
 	Thresholds           AccountThresholds `json:"thresholds"`
 	Flags                AccountFlags      `json:"flags"`
 	Balances             []Balance         `json:"balances"`
@@ -71,6 +75,18 @@ func (a Account) GetCreditBalance(code string, issuer string) string {
 	return "0"
 }
 
+// GetSequenceNumber returns the sequence number of the account,
+// and returns it as a 64-bit integer.
+func (a Account) GetSequenceNumber() (xdr.SequenceNumber, error) {
+	seqNum, err := strconv.ParseUint(a.Sequence, 10, 64)
+
+	if err != nil {
+		return 0, errors.Wrap(err, "Failed to parse account sequence number")
+	}
+
+	return xdr.SequenceNumber(seqNum), nil
+}
+
 // MustGetData returns decoded value for a given key. If the key does
 // not exist, empty slice will be returned. If there is an error
 // decoding a value, it will panic.
@@ -92,6 +108,7 @@ func (this *Account) GetData(key string) ([]byte, error) {
 type AccountFlags struct {
 	AuthRequired  bool `json:"auth_required"`
 	AuthRevocable bool `json:"auth_revocable"`
+	AuthImmutable bool `json:"auth_immutable"`
 }
 
 // AccountThresholds represents an accounts "thresholds", the numerical values
@@ -129,6 +146,8 @@ type Balance struct {
 	Limit              string `json:"limit,omitempty"`
 	BuyingLiabilities  string `json:"buying_liabilities"`
 	SellingLiabilities string `json:"selling_liabilities"`
+	LastModifiedLedger uint32 `json:"last_modified_ledger,omitempty"`
+	IsAuthorized       *bool  `json:"is_authorized,omitempty"`
 	base.Asset
 }
 
@@ -149,21 +168,22 @@ type Ledger struct {
 		Payments     hal.Link `json:"payments"`
 		Effects      hal.Link `json:"effects"`
 	} `json:"_links"`
-	ID               string    `json:"id"`
-	PT               string    `json:"paging_token"`
-	Hash             string    `json:"hash"`
-	PrevHash         string    `json:"prev_hash,omitempty"`
-	Sequence         int32     `json:"sequence"`
-	TransactionCount int32     `json:"transaction_count"`
-	OperationCount   int32     `json:"operation_count"`
-	ClosedAt         time.Time `json:"closed_at"`
-	TotalCoins       string    `json:"total_coins"`
-	FeePool          string    `json:"fee_pool"`
-	BaseFee          int32     `json:"base_fee_in_stroops"`
-	BaseReserve      int32     `json:"base_reserve_in_stroops"`
-	MaxTxSetSize     int32     `json:"max_tx_set_size"`
-	ProtocolVersion  int32     `json:"protocol_version"`
-	HeaderXDR        string    `json:"header_xdr"`
+	ID                         string    `json:"id"`
+	PT                         string    `json:"paging_token"`
+	Hash                       string    `json:"hash"`
+	PrevHash                   string    `json:"prev_hash,omitempty"`
+	Sequence                   int32     `json:"sequence"`
+	SuccessfulTransactionCount int32     `json:"successful_transaction_count"`
+	FailedTransactionCount     *int32    `json:"failed_transaction_count"`
+	OperationCount             int32     `json:"operation_count"`
+	ClosedAt                   time.Time `json:"closed_at"`
+	TotalCoins                 string    `json:"total_coins"`
+	FeePool                    string    `json:"fee_pool"`
+	BaseFee                    int32     `json:"base_fee_in_stroops"`
+	BaseReserve                int32     `json:"base_reserve_in_stroops"`
+	MaxTxSetSize               int32     `json:"max_tx_set_size"`
+	ProtocolVersion            int32     `json:"protocol_version"`
+	HeaderXDR                  string    `json:"header_xdr"`
 }
 
 func (this Ledger) PagingToken() string {
@@ -243,21 +263,21 @@ type Root struct {
 		Transactions        hal.Link  `json:"transactions"`
 	} `json:"_links"`
 
-	HorizonVersion       string `json:"horizon_version"`
-	StellarCoreVersion   string `json:"core_version"`
-	HorizonSequence      int32  `json:"history_latest_ledger"`
-	HistoryElderSequence int32  `json:"history_elder_ledger"`
-	CoreSequence         int32  `json:"core_latest_ledger"`
-	NetworkPassphrase    string `json:"network_passphrase"`
-	ProtocolVersion      int32  `json:"protocol_version"`
+	HorizonVersion               string `json:"horizon_version"`
+	StellarCoreVersion           string `json:"core_version"`
+	HorizonSequence              int32  `json:"history_latest_ledger"`
+	HistoryElderSequence         int32  `json:"history_elder_ledger"`
+	CoreSequence                 int32  `json:"core_latest_ledger"`
+	NetworkPassphrase            string `json:"network_passphrase"`
+	CurrentProtocolVersion       int32  `json:"current_protocol_version"`
+	CoreSupportedProtocolVersion int32  `json:"core_supported_protocol_version"`
 }
 
 // Signer represents one of an account's signers.
 type Signer struct {
-	PublicKey string `json:"public_key"`
-	Weight    int32  `json:"weight"`
-	Key       string `json:"key"`
-	Type      string `json:"type"`
+	Weight int32  `json:"weight"`
+	Key    string `json:"key"`
+	Type   string `json:"type"`
 }
 
 // Trade represents a horizon digested trade
@@ -357,6 +377,7 @@ type Transaction struct {
 	} `json:"_links"`
 	ID              string    `json:"id"`
 	PT              string    `json:"paging_token"`
+	Successful      bool      `json:"successful"`
 	Hash            string    `json:"hash"`
 	Ledger          int32     `json:"ledger"`
 	LedgerCloseTime time.Time `json:"created_at"`
@@ -417,6 +438,19 @@ type TransactionSuccess struct {
 	Meta   string `json:"result_meta_xdr"`
 }
 
+// PrintTransactionSuccess prints the fields of a Horizon response.
+func (resp TransactionSuccess) TransactionSuccessToString() (s string) {
+	s += fmt.Sprintln("***TransactionSuccess dump***")
+	s += fmt.Sprintln("    Links:", resp.Links)
+	s += fmt.Sprintln("    Hash:", resp.Hash)
+	s += fmt.Sprintln("    Ledger:", resp.Ledger)
+	s += fmt.Sprintln("    Env:", resp.Env)
+	s += fmt.Sprintln("    Result:", resp.Result)
+	s += fmt.Sprintln("    Meta:", resp.Meta)
+
+	return
+}
+
 // KeyTypeFromAddress converts the version byte of the provided strkey encoded
 // value (for example an account id or a signer key) and returns the appropriate
 // horizon-specific type name.
@@ -442,4 +476,131 @@ func MustKeyTypeFromAddress(address string) string {
 	}
 
 	return ret
+}
+
+// AccountData represents a single data object stored on by an account
+type AccountData struct {
+	Value string `json:"value"`
+}
+
+// EffectsPage contains page of effects returned by Horizon.
+type EffectsPage struct {
+	Embedded struct {
+		Records []effects.Base
+	} `json:"_embedded"`
+}
+
+// TradeAggregationsPage returns a list of aggregated trade records, aggregated by resolution
+type TradeAggregationsPage struct {
+	Links    hal.Links `json:"_links"`
+	Embedded struct {
+		Records []TradeAggregation `json:"records"`
+	} `json:"_embedded"`
+}
+
+// TradesPage returns a list of trade records
+type TradesPage struct {
+	Links    hal.Links `json:"_links"`
+	Embedded struct {
+		Records []Trade `json:"records"`
+	} `json:"_embedded"`
+}
+
+// OffersPage returns a list of offers
+type OffersPage struct {
+	Links    hal.Links `json:"_links"`
+	Embedded struct {
+		Records []Offer `json:"records"`
+	} `json:"_embedded"`
+}
+
+// AssetsPage contains page of assets returned by Horizon.
+type AssetsPage struct {
+	Links    hal.Links `json:"_links"`
+	Embedded struct {
+		Records []AssetStat
+	} `json:"_embedded"`
+}
+
+// LedgersPage contains page of ledger information returned by Horizon
+type LedgersPage struct {
+	Links    hal.Links `json:"_links"`
+	Embedded struct {
+		Records []Ledger
+	} `json:"_embedded"`
+}
+
+// SingleMetric represents a metric with a single value
+type SingleMetric struct {
+	Value int `json:"value"`
+}
+
+// LogMetric represents metrics that are logged by horizon for each log level
+type LogMetric struct {
+	Rate15m  float64 `json:"15m.rate"`
+	Rate1m   float64 `json:"1m.rate"`
+	Rate5m   float64 `json:"5m.rate"`
+	Count    int     `json:"count"`
+	MeanRate float64 `json:"mean.rate"`
+}
+
+// LogTotalMetric represents total metrics logged for ingester, requests and submitted transactions
+type LogTotalMetric struct {
+	LogMetric
+	Percent75   float64 `json:"75%"`
+	Percent95   float64 `json:"95%"`
+	Percent99   float64 `json:"99%"`
+	Percent99_9 float64 `json:"99.9%"`
+	Max         float64 `json:"max"`
+	Mean        float64 `json:"mean"`
+	Median      float64 `json:"median"`
+	Min         float64 `json:"min"`
+	StdDev      float64 `json:"stddev"`
+}
+
+// Metrics represents a response of metrics from horizon
+type Metrics struct {
+	Links                  hal.Links      `json:"_links"`
+	GoRoutines             SingleMetric   `json:"goroutines"`
+	HistoryElderLedger     SingleMetric   `json:"history.elder_ledger"`
+	HistoryLatestLedger    SingleMetric   `json:"history.latest_ledger"`
+	HistoryOpenConnections SingleMetric   `json:"history.open_connections"`
+	IngesterIngestLedger   LogTotalMetric `json:"ingester.ingest_ledger"`
+	IngesterClearLedger    LogTotalMetric `json:"ingester.clear_ledger"`
+	LoggingDebug           LogMetric      `json:"logging.debug"`
+	LoggingError           LogMetric      `json:"logging.error"`
+	LoggingInfo            LogMetric      `json:"logging.info"`
+	LoggingPanic           LogMetric      `json:"logging.panic"`
+	LoggingWarning         LogMetric      `json:"logging.warning"`
+	RequestsFailed         LogMetric      `json:"requests.failed"`
+	RequestsSucceeded      LogMetric      `json:"requests.succeeded"`
+	RequestsTotal          LogTotalMetric `json:"requests.total"`
+	CoreLatestLedger       SingleMetric   `json:"stellar_core.latest_ledger"`
+	CoreOpenConnections    SingleMetric   `json:"stellar_core.open_connections"`
+	TxsubBuffered          SingleMetric   `json:"txsub.buffered"`
+	TxsubFailed            LogMetric      `json:"txsub.failed"`
+	TxsubOpen              SingleMetric   `json:"txsub.open"`
+	TxsubSucceeded         LogMetric      `json:"txsub.succeeded"`
+	TxsubTotal             LogTotalMetric `json:"txsub.total"`
+}
+
+// FeeStats represents a response of fees from horizon
+// To do: implement fee suggestions if agreement is reached in https://github.com/stellar/go/issues/926
+type FeeStats struct {
+	LastLedger          int     `json:"last_ledger,string"`
+	LastLedgerBaseFee   int     `json:"last_ledger_base_fee,string"`
+	LedgerCapacityUsage float64 `json:"ledger_capacity_usage,string"`
+	MinAcceptedFee      int     `json:"min_accepted_fee,string"`
+	ModeAcceptedFee     int     `json:"mode_accepted_fee,string"`
+	P10AcceptedFee      int     `json:"p10_accepted_fee,string"`
+	P20AcceptedFee      int     `json:"p20_accepted_fee,string"`
+	P30AcceptedFee      int     `json:"p30_accepted_fee,string"`
+	P40AcceptedFee      int     `json:"p40_accepted_fee,string"`
+	P50AcceptedFee      int     `json:"p50_accepted_fee,string"`
+	P60AcceptedFee      int     `json:"p60_accepted_fee,string"`
+	P70AcceptedFee      int     `json:"p70_accepted_fee,string"`
+	P80AcceptedFee      int     `json:"p80_accepted_fee,string"`
+	P90AcceptedFee      int     `json:"p90_accepted_fee,string"`
+	P95AcceptedFee      int     `json:"p95_accepted_fee,string"`
+	P99AcceptedFee      int     `json:"p99_accepted_fee,string"`
 }

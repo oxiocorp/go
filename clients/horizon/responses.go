@@ -135,7 +135,7 @@ type Payment struct {
 	StartingBalance string `json:"starting_balance"`
 
 	// account_merge fields
-	Into string `json:into"`
+	Into string `json:"into"`
 
 	// payment/path_payment fields
 	From        string `json:"from"`

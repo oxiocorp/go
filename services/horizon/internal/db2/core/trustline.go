@@ -7,12 +7,16 @@ import (
 	"github.com/stellar/go/xdr"
 )
 
+func (tl Trustline) IsAuthorized() bool {
+	return (tl.Flags & int32(xdr.TrustLineFlagsAuthorizedFlag)) != 0
+}
+
 // AssetsForAddress loads `dest` as `[]xdr.Asset` with every asset the account
 // at `addy` can hold.
-func (q *Q) AssetsForAddress(dest interface{}, addy string, protocolVersion int32) error {
+func (q *Q) AssetsForAddress(dest interface{}, addy string) error {
 	var tls []Trustline
 
-	err := q.TrustlinesByAddress(&tls, addy, protocolVersion)
+	err := q.TrustlinesByAddress(&tls, addy)
 	if err != nil {
 		return err
 	}
@@ -37,17 +41,41 @@ func (q *Q) AssetsForAddress(dest interface{}, addy string, protocolVersion int3
 	return err
 }
 
-// TrustlinesByAddress loads all trustlines for `addy`
-func (q *Q) TrustlinesByAddress(dest interface{}, addy string, protocolVersion int32) error {
-	var selectQuery sq.SelectBuilder
+// AllAssets loads all (unique) assets from core DB
+func (q *Q) AllAssets(dest interface{}) error {
+	var tls []Trustline
 
-	if protocolVersion >= 10 {
-		selectQuery = selectTrustline
-	} else {
-		selectQuery = selectTrustlinePreV10
+	sql := sq.Select(
+		"tl.assettype",
+		"tl.issuer",
+		"tl.assetcode",
+	).From("trustlines tl").GroupBy("(tl.assettype, tl.issuer, tl.assetcode)")
+	err := q.Select(&tls, sql)
+	if err != nil {
+		return err
 	}
 
-	sql := selectQuery.Where("accountid = ?", addy)
+	dtl, ok := dest.(*[]xdr.Asset)
+	if !ok {
+		return errors.New("Invalid destination")
+	}
+
+	result := make([]xdr.Asset, len(tls))
+	*dtl = result
+
+	for i, tl := range tls {
+		result[i], err = AssetFromDB(tl.Assettype, tl.Assetcode, tl.Issuer)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// TrustlinesByAddress loads all trustlines for `addy`
+func (q *Q) TrustlinesByAddress(dest interface{}, addy string) error {
+	sql := selectTrustline.Where("accountid = ?", addy)
 	return q.Select(dest, sql)
 }
 
@@ -79,20 +107,11 @@ var selectTrustline = sq.Select(
 	"tl.tlimit",
 	"tl.balance",
 	"tl.flags",
+	"tl.lastmodified",
 	// Liabilities can be NULL so can error without `coalesce`:
 	// `Invalid value for xdr.Int64`
 	"coalesce(tl.buyingliabilities, 0) as buyingliabilities",
 	"coalesce(tl.sellingliabilities, 0) as sellingliabilities",
-).From("trustlines tl")
-
-var selectTrustlinePreV10 = sq.Select(
-	"tl.accountid",
-	"tl.assettype",
-	"tl.issuer",
-	"tl.assetcode",
-	"tl.tlimit",
-	"tl.balance",
-	"tl.flags",
 ).From("trustlines tl")
 
 var selectBalances = sq.Select("COUNT(*)", "COALESCE(SUM(balance), 0) as sum").From("trustlines")

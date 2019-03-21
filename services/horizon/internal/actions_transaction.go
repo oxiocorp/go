@@ -3,21 +3,28 @@ package horizon
 import (
 	"net/http"
 
+	"github.com/stellar/go/protocols/horizon"
+	"github.com/stellar/go/services/horizon/internal/actions"
 	"github.com/stellar/go/services/horizon/internal/db2"
 	"github.com/stellar/go/services/horizon/internal/db2/history"
-	"github.com/stellar/go/services/horizon/internal/resourceadapter"
 	hProblem "github.com/stellar/go/services/horizon/internal/render/problem"
-	"github.com/stellar/go/services/horizon/internal/txsub"
-	"github.com/stellar/go/support/render/problem"
-	"github.com/stellar/go/protocols/horizon"
-	"github.com/stellar/go/support/render/hal"
 	"github.com/stellar/go/services/horizon/internal/render/sse"
+	"github.com/stellar/go/services/horizon/internal/resourceadapter"
+	"github.com/stellar/go/services/horizon/internal/txsub"
+	"github.com/stellar/go/support/errors"
+	"github.com/stellar/go/support/render/hal"
+	"github.com/stellar/go/support/render/problem"
+	"github.com/stellar/go/xdr"
 )
 
 // This file contains the actions:
 //
 // TransactionIndexAction: pages of transactions
 // TransactionShowAction: single transaction by sequence, by hash or id
+
+// Interface verifications
+var _ actions.JSONer = (*TransactionIndexAction)(nil)
+var _ actions.EventStreamer = (*TransactionIndexAction)(nil)
 
 // TransactionIndexAction renders a page of ledger resources, identified by
 // a normal page query.
@@ -28,24 +35,24 @@ type TransactionIndexAction struct {
 	PagingParams  db2.PageQuery
 	Records       []history.Transaction
 	Page          hal.Page
+	IncludeFailed bool
 }
 
 // JSON is a method for actions.JSON
-func (action *TransactionIndexAction) JSON() {
+func (action *TransactionIndexAction) JSON() error {
 	action.Do(
 		action.EnsureHistoryFreshness,
 		action.loadParams,
 		action.ValidateCursorWithinHistory,
 		action.loadRecords,
 		action.loadPage,
-		func() {
-			hal.Render(action.W, action.Page)
-		},
+		func() { hal.Render(action.W, action.Page) },
 	)
+	return action.Err
 }
 
 // SSE is a method for actions.SSE
-func (action *TransactionIndexAction) SSE(stream sse.Stream) {
+func (action *TransactionIndexAction) SSE(stream *sse.Stream) error {
 	action.Setup(
 		action.EnsureHistoryFreshness,
 		action.loadParams,
@@ -64,13 +71,38 @@ func (action *TransactionIndexAction) SSE(stream sse.Stream) {
 			}
 		},
 	)
+
+	return action.Err
 }
 
 func (action *TransactionIndexAction) loadParams() {
 	action.ValidateCursorAsDefault()
-	action.AccountFilter = action.GetString("account_id")
+	action.AccountFilter = action.GetAddress("account_id")
 	action.LedgerFilter = action.GetInt32("ledger_id")
 	action.PagingParams = action.GetPageQuery()
+	action.IncludeFailed = action.GetBool("include_failed")
+
+	filters, err := countNonEmpty(
+		action.AccountFilter,
+		action.LedgerFilter,
+	)
+
+	if err != nil {
+		action.Err = errors.Wrap(err, "Error in countNonEmpty")
+		return
+	}
+
+	if filters > 1 {
+		action.Err = problem.BadRequest
+		return
+	}
+
+	if action.IncludeFailed == true && !action.App.config.IngestFailedTransactions {
+		err := errors.New("`include_failed` parameter is unavailable when Horizon is not ingesting failed " +
+			"transactions. Set `INGEST_FAILED_TRANSACTIONS=true` to start ingesting them.")
+		action.Err = problem.MakeInvalidFieldProblem("include_failed", err)
+		return
+	}
 }
 
 func (action *TransactionIndexAction) loadRecords() {
@@ -84,7 +116,34 @@ func (action *TransactionIndexAction) loadRecords() {
 		txs.ForLedger(action.LedgerFilter)
 	}
 
+	if action.IncludeFailed {
+		txs.IncludeFailed()
+	}
+
 	action.Err = txs.Page(action.PagingParams).Select(&action.Records)
+	if action.Err != nil {
+		return
+	}
+
+	for _, t := range action.Records {
+		if !action.IncludeFailed {
+			if !t.IsSuccessful() {
+				action.Err = errors.Errorf("Corrupted data! `include_failed=false` but returned transaction is failed: %s", t.TransactionHash)
+				return
+			}
+
+			var resultXDR xdr.TransactionResult
+			action.Err = xdr.SafeUnmarshalBase64(t.TxResult, &resultXDR)
+			if action.Err != nil {
+				return
+			}
+
+			if resultXDR.Result.Code != xdr.TransactionResultCodeTxSuccess {
+				action.Err = errors.Errorf("Corrupted data! `include_failed=false` but returned transaction is failed: %s %s", t.TransactionHash, t.TxResult)
+				return
+			}
+		}
+	}
 }
 
 func (action *TransactionIndexAction) loadPage() {
@@ -100,6 +159,9 @@ func (action *TransactionIndexAction) loadPage() {
 	action.Page.Order = action.PagingParams.Order
 	action.Page.PopulateLinks()
 }
+
+// Interface verification
+var _ actions.JSONer = (*TransactionShowAction)(nil)
 
 // TransactionShowAction renders a ledger found by its sequence number.
 type TransactionShowAction struct {
@@ -122,7 +184,7 @@ func (action *TransactionShowAction) loadResource() {
 }
 
 // JSON is a method for actions.JSON
-func (action *TransactionShowAction) JSON() {
+func (action *TransactionShowAction) JSON() error {
 	action.Do(
 		action.EnsureHistoryFreshness,
 		action.loadParams,
@@ -130,7 +192,11 @@ func (action *TransactionShowAction) JSON() {
 		action.loadResource,
 		func() { hal.Render(action.W, action.Resource) },
 	)
+	return action.Err
 }
+
+// Interface verification
+var _ actions.JSONer = (*TransactionCreateAction)(nil)
 
 // TransactionCreateAction submits a transaction to the stellar-core network
 // on behalf of the requesting client.
@@ -142,15 +208,14 @@ type TransactionCreateAction struct {
 }
 
 // JSON format action handler
-func (action *TransactionCreateAction) JSON() {
+func (action *TransactionCreateAction) JSON() error {
 	action.Do(
 		action.loadTX,
 		action.loadResult,
 		action.loadResource,
-
-		func() {
-			hal.Render(action.W, action.Resource)
-		})
+		func() { hal.Render(action.W, action.Resource) },
+	)
+	return action.Err
 }
 
 func (action *TransactionCreateAction) loadTX() {
