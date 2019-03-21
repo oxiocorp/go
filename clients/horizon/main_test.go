@@ -271,10 +271,12 @@ func TestLoadAccountTransactions(t *testing.T) {
 
 	_, err = client.LoadAccountTransactions("GCK6ALX65S5KTQRKX3OWG5DNCJ7XMI62N55TKRM6ZI2YNWDSO3PX3YSZ")
 	if assert.Error(t, err) {
+		err = errors.Cause(err)
 		assert.Contains(t, err.Error(), "Horizon error")
 		horizonError, ok := err.(*Error)
-		assert.Equal(t, ok, true)
-		assert.Equal(t, horizonError.Problem.Title, "Resource Missing")
+		if assert.Equal(t, ok, true) {
+			assert.Equal(t, horizonError.Problem.Title, "Resource Missing")
+		}
 	}
 
 	// connection error
